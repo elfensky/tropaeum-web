@@ -1,0 +1,84 @@
+# Docker Swarm stack "tropaeum" — tropaeum.app on the production swarm.
+#
+# Source of truth: this file on `main`. On every green build of main, CI
+# (.github/workflows/deploy.yml) renders it with the image pinned to
+# :sha-<commit> and commits the result to deploy/production/compose.yaml on the
+# `deploy` branch. Arcane Git Sync applies that copy. CI is the only writer of
+# the `deploy` branch: never edit the image line by hand, here or there.
+# Rollback is a `git revert` of a pin commit on `deploy`, never
+# `docker stack deploy`.
+#
+# Prereq — one external Swarm secret, created once on a manager:
+#   tropaeum_cloudflared   Cloudflare Tunnel token of tunnel `tropaeum.app (production)` (remotely managed)
+#
+# Ingress is the stack's own Cloudflare Tunnel: cloudflared dials out, nothing
+# publishes a port. The public hostnames (tropaeum.app and www.tropaeum.app ->
+# http://web:80) live in the Zero Trust dashboard — `web` is the short service
+# name, resolved on this stack's overlay, so it follows tasks across nodes.
+
+networks:
+  internal:
+    driver: overlay
+
+secrets:
+  tropaeum_cloudflared:
+    external: true
+
+services:
+  web:
+    # Rewritten by CI on the `deploy` branch (the pin replaces everything after
+    # the colon, so keep no comment on that line). The tag below does not exist
+    # on purpose: this copy is never deployed as-is.
+    image: ghcr.io/elfensky/tropaeum-web:sha-005b0e436c23ae67685b4e1b1bc09779227824a8
+    networks: [internal]
+    environment:
+      # Production is indexable. The image fails closed with
+      # "noindex, nofollow"; an empty value sends no X-Robots-Tag at all.
+      ROBOTS_TAG: ''
+    # Stateless nginx serving a baked-in file: scale freely. The healthcheck is
+    # in the image, so start-first gates the rollout on real health.
+    deploy:
+      replicas: 2
+      placement:
+        constraints: ["node.labels.role == apps"]
+        preferences:
+          - spread: node.id
+      update_config:
+        order: start-first
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        order: start-first
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # ENTRYPOINT is already `cloudflared --no-autoupdate`.
+    command: tunnel run
+    networks: [internal]
+    environment:
+      # `tunnel run` honours $TUNNEL_TOKEN_FILE, so the token stays a Swarm
+      # secret and never lands in the service spec.
+      TUNNEL_TOKEN_FILE: /run/secrets/tropaeum_cloudflared
+    secrets:
+      - tropaeum_cloudflared
+    # Every replica registers as a connector on the same tunnel; Cloudflare
+    # load-balances across them, so one task dying keeps ingress.
+    deploy:
+      replicas: 2
+      placement:
+        constraints: ["node.labels.role == apps"]
+      update_config:
+        order: start-first
+        failure_action: rollback
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
