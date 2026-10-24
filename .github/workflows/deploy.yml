@@ -1,0 +1,131 @@
+name: Build and pin
+
+# Push to main → production. Every green build pushes an image as
+# ghcr.io/<repo>:sha-<commit>, then renders deploy/production/compose.yaml with
+# that tag and commits it to the `deploy` branch. Arcane Git Sync applies what
+# the deploy branch says — the tag in git IS the deploy, and rollback is a
+# `git revert` of a pin commit on `deploy`.
+#
+# Why a separate branch: CI is the only writer of `deploy` and never touches
+# the branches people work on. Pushes made with GITHUB_TOKEN trigger no
+# workflows, so a pin cannot loop.
+
+on:
+  push:
+    branches: [main]
+    # Doc files never change the image. Root *.md only — a single `*` does not
+    # cross `/`.
+    paths-ignore:
+      - '*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per branch at a time, never cancelled mid-way: a newer push queues
+# behind the running one, so an older pin can never land after a newer one.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # shortcut: amd64 only (the production swarm is all amd64); add QEMU and
+      # linux/arm64 if a stack ever runs this image on the Pi swarm.
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+
+  pin:
+    name: Pin image on the deploy branch
+    needs: build
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      ENV_NAME: production
+      IMAGE: ghcr.io/${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Render the pinned compose file
+        run: |
+          src="deploy/$ENV_NAME/compose.yaml"
+          # Fail loudly when the pattern does not match: a non-matching sed exits
+          # 0 having changed nothing, and the job would go green on a stale pin.
+          grep -qE "^[[:space:]]*image: ${IMAGE}:" "$src" || {
+            echo "::error::no 'image: ${IMAGE}:…' line in $src — refusing to pin nothing"
+            exit 1
+          }
+          sed -E "s#^([[:space:]]*image: ${IMAGE}:).*#\1sha-${SHA}#" "$src" > "$RUNNER_TEMP/compose.yaml"
+          grep -qF "image: ${IMAGE}:sha-${SHA}" "$RUNNER_TEMP/compose.yaml" || {
+            echo "::error::the rendered file does not name sha-${SHA} — the pin did not take"
+            exit 1
+          }
+
+      - name: Commit the pin to the deploy branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # A rejected push is retried from a fresh copy of the branch rather
+          # than rebased.
+          publish() {
+            if git ls-remote --exit-code --heads origin deploy >/dev/null; then
+              git fetch -q --depth=1 origin deploy || return 1
+              git switch -q -C deploy FETCH_HEAD || return 1
+            else
+              git switch -q --orphan deploy || return 1
+            fi
+            mkdir -p "deploy/$ENV_NAME"
+            cp "$RUNNER_TEMP/compose.yaml" "deploy/$ENV_NAME/compose.yaml"
+            git add "deploy/$ENV_NAME/compose.yaml"
+            if git diff --cached --quiet; then
+              echo "already pinned to sha-${SHA}"
+              return 0
+            fi
+            git commit -q -m "chore(deploy): $ENV_NAME → sha-${SHA:0:12}" \
+              -m "Pinned by CI from $GITHUB_REF_NAME@$SHA. Do not edit by hand; revert to roll back." || return 1
+            git push -q origin deploy
+          }
+
+          for attempt in 1 2 3; do
+            publish && exit 0
+            echo "::warning::pin attempt $attempt failed (deploy branch moved?) — retrying"
+            sleep 5
+          done
+          echo "::error::could not push the pin to the deploy branch"
+          exit 1
