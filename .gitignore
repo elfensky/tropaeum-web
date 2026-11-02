@@ -1,0 +1,18 @@
+# macOS-specific files (one under .planning/ would trip keijiban's publish gate)
+.DS_Store
+
+# GSD runtime state (not planning documents)
+.gsd/
+.planning/state.json
+.planning/estimation-calibration.json
+.planning/milestone.lock
+
+# GSD research fetch cache (machine artifacts, not planning docs)
+.planning/research/.cache/
+
+# GSD local caches and sessions: codebase intel, debug sessions, UI-review captures
+.planning/intel/
+.planning/ui-reviews/
+
+# Playwright MCP scratch output (UAT screenshots, snapshots)
+.playwright-mcp/
