@@ -93,13 +93,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by the roadmapper) | | |
+| CI-01 | Phase 1 | Pending |
+| CI-02 | Phase 1 | Pending |
+| CI-03 | Phase 1 | Pending |
+| CI-04 | Phase 1 | Pending |
+| CI-05 | Phase 1 | Pending |
+| CI-06 | Phase 1 | Pending |
+| SUP-01 | Phase 2 | Pending |
+| SUP-02 | Phase 2 | Pending |
+| SUP-03 | Phase 2 | Pending |
+| SUP-04 | Phase 2 | Pending |
+| SUP-05 | Phase 2 | Pending |
+| HDR-01 | Phase 3 | Pending |
+| HDR-02 | Phase 3 | Pending |
+| HDR-03 | Phase 3 | Pending |
+| IMG-01 | Phase 3 | Pending |
+| IMG-02 | Phase 3 | Pending |
+| TUN-01 | Phase 4 | Pending |
+| TUN-02 | Phase 4 | Pending |
+| META-01 | Phase 5 | Pending |
+| META-02 | Phase 5 | Pending |
+| META-03 | Phase 5 | Pending |
+| OPS-01 | Phase 6 | Pending |
+| OPS-02 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 ⚠️
+- v1 requirements: 23 total
+- Mapped to phases: 23
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-02*
-*Last updated: 2026-11-02 after initial definition*
+*Last updated: 2026-11-02 after roadmap creation*
