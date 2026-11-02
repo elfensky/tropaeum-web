@@ -12,7 +12,6 @@
 
 # GSD local caches and sessions: codebase intel, debug sessions, UI-review captures
 .planning/intel/
-.planning/debug/
 .planning/ui-reviews/
 
 # Playwright MCP scratch output (UAT screenshots, snapshots)
